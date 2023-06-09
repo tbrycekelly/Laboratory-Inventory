@@ -10,9 +10,9 @@ new.entry = function() {
     description = 'A pump.',
     amount = '2',
     location = list(
-      room = NA,
-      box = NA,
-      pos = NA
+      room = '',
+      box = '',
+      pos = ''
     ),
     history = list()
   )
@@ -34,6 +34,7 @@ export = function(inv) {
   res = data.frame(id = rep(NA, length(inv)),
                    name = NA,
                    amount = NA,
+                   location = NA,
                    history = NA
   )
   
@@ -41,7 +42,10 @@ export = function(inv) {
     res$id[i] = inv[[i]]$id
     res$name[i] = inv[[i]]$name
     res$amount[i] = inv[[i]]$amount
-    #res$history[i] = length(inv[[i]]$history)
+    if (sum(!is.na(inv[[i]]$location))>0) {
+      res$location[i] = paste(names(inv[[i]]$location)[!is.na(inv[[i]]$location)], inv[[i]]$location[!is.na(inv[[i]]$location)], collapse = '; ')
+    }
+    res$history[i] = length(inv[[i]]$history)
   }
   message(Sys.time(), ': Finishing Export.')
   res
@@ -59,11 +63,12 @@ appCSS = ".mandatory_star { color: red; }"
 
 
 ## Setup (one time)
-#entry = new.entry()
-#entry = update.entry(entry, 'Init.')
-#entry = update.entry(entry, 'Testing')
-#saveRDS(list(entry, entry), file = 'inventory.rds')
-
+if (!file.exists('inventory.rds')) {
+  entry = new.entry()
+  entry = update.entry(entry, 'Init.')
+  entry = update.entry(entry, 'Testing')
+  saveRDS(list(entry, entry), file = 'inventory.rds')
+}
 
 
 
@@ -80,8 +85,8 @@ ui = fluidPage(
       column(
         width = 9,
         fluidRow(
+          actionButton("edit_button", "Details", icon("edit")),
           actionButton("add_button", "Add", icon("plus")),
-          actionButton("edit_button", "Edit", icon("edit")),
           actionButton("copy_button", "Copy", icon("copy")),
           actionButton("delete_button", "Delete", icon("trash-alt"))
         ),
@@ -137,13 +142,21 @@ server <- function(input, output, session) {
             fluidPage(
               fluidRow(
                 splitLayout(
-                  cellWidths = c("100px", "200px", "75px"),
+                  cellWidths = c("100px", "225px", "75px"),
                   cellArgs = list(style = "vertical-align: top"),
                   textInput("id", labelMandatory("ID"), value = digest::digest(Sys.time(), algo = 'crc32')),
                   textInput("name", labelMandatory("Name"), placeholder = ""),
                   textInput("quantity", "Quantity", placeholder = "")
                 ),
-                textAreaInput("desc", "Description", placeholder = "", height = 30, width = "354px"),
+                checkboxGroupInput('class', 'Category', c('Equipment', 'Consumable', 'Other'), inline = T),
+                splitLayout(
+                  cellWidths = c("100px", "150px", "150px"),
+                  cellArgs = list(style = "vertical-align: top"),
+                  selectInput('room', 'Location', c(NA, 'Irving2', 'Office', 'SMC', 'Field')),
+                  textInput("box", 'Box', placeholder = ""),
+                  textInput("pos", 'Position', placeholder = "")
+                ),
+                textAreaInput("desc", "Description", placeholder = "", height = 35, width = "354px"),
                 textAreaInput("note", "Note", placeholder = "", height = 100, width = "354px"),
                 helpText(labelMandatory(""), paste("Mandatory field.")),
                 actionButton(button_id, "Submit"),
@@ -165,6 +178,7 @@ server <- function(input, output, session) {
     input$submit_edit
     input$copy_button
     input$delete_button
+    input$add_button
     
     
     readRDS('inventory.rds')
@@ -181,6 +195,9 @@ server <- function(input, output, session) {
                            quantity = input$quantity,
                            desc = input$desc,
                            note = input$note,
+                           room = input$room,
+                           box = input$box,
+                           pos = input$pos,
                            datetime = Sys.time(),
                            stringsAsFactors = FALSE)
     return(formData)
@@ -190,12 +207,15 @@ server <- function(input, output, session) {
   #Add data
   appendData <- function(data){
     
-    message(Sys.time(), ': Appending data.')
+    message(data$datetime, ': Appending data.')
     new = new.entry()
     new$id = data$id
     new$name = data$name
     new$description = data$desc
     new$amount = data$quantity
+    new$location$room = data$room
+    new$location$box = data$box
+    new$location$pos = data$pos
     
     inv = inventory()
     inv[[length(inv)+1]] = new
@@ -304,6 +324,11 @@ server <- function(input, output, session) {
       updateTextInput(session, "name", value = inv[[input$responses_table_rows_selected]]$name)
       updateTextInput(session, "quantity", value = inv[[input$responses_table_rows_selected]]$amount)
       updateTextInput(session, "desc", value = inv[[input$responses_table_rows_selected]]$description)
+      updateCheckboxGroupInput(session, 'class', selected = inv[[input$responses_table_rows_selected]]$class)
+      
+      updateSelectInput(session, "room", selected = inv[[input$responses_table_rows_selected]]$location$room)
+      updateTextInput(session, "box", value = inv[[input$responses_table_rows_selected]]$location$box)
+      updateTextInput(session, "pos", value = inv[[input$responses_table_rows_selected]]$location$pos)
     }
     
   })
@@ -326,6 +351,19 @@ server <- function(input, output, session) {
     if (inv[[input$responses_table_row_last_clicked]]$description != input$desc) {
       inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed description from ', inv[[input$responses_table_row_last_clicked]]$description, ' to ', input$desc))
       inv[[input$responses_table_row_last_clicked]]$description = input$desc
+    }
+    
+    if (inv[[input$responses_table_row_last_clicked]]$location$room != input$room) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed description from ', inv[[input$responses_table_row_last_clicked]]$location$room, ' to ', input$room))
+      inv[[input$responses_table_row_last_clicked]]$location$room = input$room
+    }
+    if (inv[[input$responses_table_row_last_clicked]]$location$box != input$box) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed description from ', inv[[input$responses_table_row_last_clicked]]$location$box, ' to ', input$box))
+      inv[[input$responses_table_row_last_clicked]]$location$box = input$box
+    }
+    if (inv[[input$responses_table_row_last_clicked]]$location$pos != input$pos) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed description from ', inv[[input$responses_table_row_last_clicked]]$location$pos, ' to ', input$pos))
+      inv[[input$responses_table_row_last_clicked]]$location$pos = input$pos
     }
     saveRDS(inv, 'inventory.rds')
     removeModal()
