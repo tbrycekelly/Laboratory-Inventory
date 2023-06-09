@@ -25,20 +25,25 @@ update.entry = function(entry, message) {
   entry
 }
 
-export = function(inventory) {
-  res = data.frame(id = rep(NA, length(inventory)),
+export = function(inv) {
+  message(Sys.time(), ': Starting Export.')
+  if (length(inv) == 0) {
+    message(Sys.time(), ': Error: No inventory for Export!')
+    inv = list(new.entry())
+  }
+  res = data.frame(id = rep(NA, length(inv)),
                    name = NA,
                    amount = NA,
                    history = NA
   )
   
-  for (i in 1:length(inventory)) {
-    res$id[i] = inventory[[i]]$id
-    res$name[i] = inventory[[i]]$name
-    res$amount[i] = inventory[[i]]$amount
-    #res$history[i] = length(inventory[[i]]$history)
+  for (i in 1:length(inv)) {
+    res$id[i] = inv[[i]]$id
+    res$name[i] = inv[[i]]$name
+    res$amount[i] = inv[[i]]$amount
+    #res$history[i] = length(inv[[i]]$history)
   }
-  
+  message(Sys.time(), ': Finishing Export.')
   res
 }
 
@@ -57,8 +62,7 @@ appCSS = ".mandatory_star { color: red; }"
 #entry = new.entry()
 #entry = update.entry(entry, 'Init.')
 #entry = update.entry(entry, 'Testing')
-#saveRDS(entry, file = 'inventory.rds')
-
+#saveRDS(list(entry, entry), file = 'inventory.rds')
 
 
 
@@ -82,8 +86,7 @@ ui = fluidPage(
           actionButton("delete_button", "Delete", icon("trash-alt"))
         ),
         br(),
-        fluidRow(width="100%",
-                 dataTableOutput("responses_table", width = "100%")
+        fluidRow(width="100%", dataTableOutput("responses_table", width = "100%")
         )
       )
     )
@@ -95,24 +98,24 @@ server <- function(input, output, session) {
   
   #load responses_df and make reactive to inputs  
   responses_df <- reactive({
-    
+    message(Sys.time(), ': Update responses.')
     #make reactive to
     input$submit
     input$submit_edit
     input$copy_button
     input$delete_button
     
-    dbReadTable(pool, "responses_df")
+    export(inventory())
     
   })  
   
   #List of mandatory fields for submission
-  fieldsMandatory <- c("id", "name")
+  fieldsMandatory <- c("id", 'name')
   
   #define which input fields are mandatory 
   observe({
     
-    mandatoryFilled <-
+    mandatoryFilled =
       vapply(fieldsMandatory,
              function(x) {
                !is.null(input[[x]]) && input[[x]] != ""
@@ -129,20 +132,23 @@ server <- function(input, output, session) {
     showModal(
       modalDialog(
         div(id=("entry_form"),
-            tags$head(tags$style(".modal-dialog{ width:400px}")),
+            tags$head(tags$style(".modal-dialog{ width:460px}")),
             tags$head(tags$style(HTML(".shiny-split-layout > div {overflow: visible}"))),
             fluidPage(
               fluidRow(
                 splitLayout(
                   cellWidths = c("100px", "200px", "75px"),
                   cellArgs = list(style = "vertical-align: top"),
-                  textInput("id", labelMandatory("ID"), placeholder = digest::digest(Sys.time(), algo = 'crc32')),
+                  textInput("id", labelMandatory("ID"), value = digest::digest(Sys.time(), algo = 'crc32')),
                   textInput("name", labelMandatory("Name"), placeholder = ""),
-                  textInput("quantity", labelMandatory("Quantity"), placeholder = "")
+                  textInput("quantity", "Quantity", placeholder = "")
                 ),
+                textAreaInput("desc", "Description", placeholder = "", height = 30, width = "354px"),
                 textAreaInput("note", "Note", placeholder = "", height = 100, width = "354px"),
                 helpText(labelMandatory(""), paste("Mandatory field.")),
                 actionButton(button_id, "Submit"),
+                shiny::hr(),
+                p('Revision history:'),
                 htmlOutput('history')
               ),
               easyClose = TRUE
@@ -153,7 +159,14 @@ server <- function(input, output, session) {
   }
   
   inventory = reactive({
-    invalidateLater(10*1e3)
+    message(Sys.time(), ': Loading inventory.')
+    #invalidateLater(10*1e3)
+    input$submit
+    input$submit_edit
+    input$copy_button
+    input$delete_button
+    
+    
     readRDS('inventory.rds')
   })
   
@@ -162,10 +175,11 @@ server <- function(input, output, session) {
   
   #save form data into data_frame format
   formData <- reactive({
-    
+    message(Sys.time(), ': Received new data.')
     formData <- data.frame(id = input$id,
                            name = input$name,
                            quantity = input$quantity,
+                           desc = input$desc,
                            note = input$note,
                            datetime = Sys.time(),
                            stringsAsFactors = FALSE)
@@ -176,9 +190,11 @@ server <- function(input, output, session) {
   #Add data
   appendData <- function(data){
     
+    message(Sys.time(), ': Appending data.')
     new = new.entry()
     new$id = data$id
     new$name = data$name
+    new$description = data$desc
     new$amount = data$quantity
     
     inv = inventory()
@@ -187,13 +203,13 @@ server <- function(input, output, session) {
   }
   
   observeEvent(input$add_button, priority = 20,{
-    
+    message(Sys.time(), ': Add Button.')
     entry_form("submit")
     
   })
   
   observeEvent(input$submit, priority = 20,{
-    
+    message(Sys.time(), ': Submit Button.')
     appendData(formData())
     shinyjs::reset("entry_form")
     removeModal()
@@ -203,6 +219,7 @@ server <- function(input, output, session) {
   #delete data
   deleteData <- reactive({
     
+    message(Sys.time(), ': Deleting data.')
     inv = inventory()
     inv[[input$responses_table_rows_selected]] = NULL
     saveRDS(inv, 'inventory.rds')
@@ -211,6 +228,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$delete_button, priority = 20,{
     
+    message(Sys.time(), ': Delete Button.')
     if(length(input$responses_table_rows_selected)>=1 ){
       deleteData()
     }
@@ -227,12 +245,17 @@ server <- function(input, output, session) {
   
   copyData <- reactive({
     
+    message(Sys.time(), ': Copying entry(s).')
     inv = inventory()
     k = input$responses_table_rows_selected
     
     if (length(k) > 0) {
       for (kk in k) {
         inv[[length(inv) + 1]] = inv[[kk]] 
+        inv[[length(inv) + 1]]$id = digest::digest(Sys.time(), algo = 'crc32')
+        inv[[kk]] = update.entry(inv[[kk]], paste0('Copied to new entry ', inv[[length(inv) + 1]]$id))
+        inv[[length(inv) + 1]] = update.entry(inv[[length(inv) + 1]], paste0('Copied from old entry ', inv[[kk]]$id))
+        
       }
       saveRDS(inv, 'inventory.rds')
     }
@@ -240,6 +263,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$copy_button, priority = 20,{
     
+    message(Sys.time(), ': Copy Button.')
     if(length(input$responses_table_rows_selected)>=1 ){
       copyData()
     }
@@ -258,6 +282,7 @@ server <- function(input, output, session) {
   #edit data
   observeEvent(input$edit_button, priority = 20,{
     
+    message(Sys.time(), ': Editing entry.')
     inv = inventory()
     
     showModal(
@@ -278,34 +303,50 @@ server <- function(input, output, session) {
       updateTextInput(session, "id", value = inv[[input$responses_table_rows_selected]]$id)
       updateTextInput(session, "name", value = inv[[input$responses_table_rows_selected]]$name)
       updateTextInput(session, "quantity", value = inv[[input$responses_table_rows_selected]]$amount)
+      updateTextInput(session, "desc", value = inv[[input$responses_table_rows_selected]]$description)
     }
     
   })
   
   observeEvent(input$submit_edit, priority = 20, {
-    
+    message(Sys.time(), ': Submit Edit.')
     inv = inventory()
-    inv[[input$responses_table_row_last_clicked]]$id = input$id
-    inv[[input$responses_table_row_last_clicked]]$name = input$name
-    inv[[input$responses_table_row_last_clicked]]$amount = input$quantity
-    
+    if (inv[[input$responses_table_row_last_clicked]]$id != input$id) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed id from ', inv[[input$responses_table_row_last_clicked]]$id, ' to ', input$id))
+      inv[[input$responses_table_row_last_clicked]]$id = input$id
+    }
+    if (inv[[input$responses_table_row_last_clicked]]$name != input$name) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed name from ', inv[[input$responses_table_row_last_clicked]]$name, ' to ', input$name))
+      inv[[input$responses_table_row_last_clicked]]$name = input$name
+    }
+    if (inv[[input$responses_table_row_last_clicked]]$amount != input$quantity) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed amount from ', inv[[input$responses_table_row_last_clicked]]$amount, ' to ', input$quantity))
+      inv[[input$responses_table_row_last_clicked]]$amount = input$quantity
+    }
+    if (inv[[input$responses_table_row_last_clicked]]$description != input$desc) {
+      inv[[input$responses_table_row_last_clicked]] = update.entry(inv[[input$responses_table_row_last_clicked]], paste0('Changed description from ', inv[[input$responses_table_row_last_clicked]]$description, ' to ', input$desc))
+      inv[[input$responses_table_row_last_clicked]]$description = input$desc
+    }
+    saveRDS(inv, 'inventory.rds')
     removeModal()
     
   })
   
   
   output$responses_table <- DT::renderDataTable({
-    
+    message(Sys.time(), ': Generting dataframe for inventory.')
     export(inventory())
     
   })
   
   output$history = renderUI({
-    inv = inventory()
-    message('UI')
-    hist = inv[[input$responses_table_row_last_clicked]]$history
-    message('UI2')
-    HTML(paste0(hist, collapse = '<br />'))
+    
+    message(Sys.time(), ': Rendering history.')
+    if (!is.null(input$responses_table_rows_selected)) {
+      inv = inventory()
+      hist = inv[[input$responses_table_row_last_clicked]]$history
+      return(HTML(paste0(hist, collapse = '<br />')))
+    }
   })
   
 }
