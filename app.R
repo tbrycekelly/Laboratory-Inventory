@@ -133,7 +133,7 @@ server <- function(input, output, session) {
   
   #Form for data entry
   entry_form <- function(button_id){
-    
+    Sys.sleep(0.2)
     showModal(
       modalDialog(
         div(id=("entry_form"),
